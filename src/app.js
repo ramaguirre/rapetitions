@@ -46,7 +46,7 @@ const els = {
   stage: $("stage"), video: $("video"), overlay: $("overlay"), trace: $("trace"), count: $("count"),
   status: $("status"), sets: $("sets"), intro: $("intro"), start: $("start"), loadmsg: $("loadmsg"),
   controls: $("controls"), mode: $("mode"), flip: $("flip"), voice: $("voice"), endset: $("endset"),
-  reset: $("reset"), stop: $("stop"), awake: $("awake"),
+  reset: $("reset"), stop: $("stop"), awake: $("awake"), perf: $("perf"),
 };
 for (const el of document.querySelectorAll("[data-i18n]")) {
   const v = T[el.dataset.i18n];
@@ -57,7 +57,7 @@ const settings = load("rapetitions.settings", { mode: "body", voice: true, facin
 const app = {
   running: false, stream: null, landmarker: null, trackerFailed: false,
   counter: null, pose: new PoseFeatures(), lastPose: null, lastVideoTime: -1, frames: 0,
-  wakeLock: null, seenPerson: false, t0: performance.now(),
+  wakeLock: null, seenPerson: false, t0: performance.now(), nextAt: 0, busyMs: 0,
 };
 window.__rap = app; // for the browser tests
 
@@ -146,7 +146,7 @@ async function openCamera() {
   if (app.stream) for (const tr of app.stream.getTracks()) tr.stop();
   app.stream = await navigator.mediaDevices.getUserMedia({
     audio: false,
-    video: { facingMode: settings.facing, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
+    video: { facingMode: settings.facing, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30, max: 30 } },
   });
   els.video.srcObject = app.stream;
   await els.video.play();
@@ -164,12 +164,17 @@ async function ensureTracker() {
       runningMode: "VIDEO",
       numPoses: 1,
     });
-    try {
-      app.landmarker = await PoseLandmarker.createFromOptions(files, options("GPU"));
-    } catch (gpuErr) {
-      console.info("GPU tracker unavailable, using CPU", gpuErr);
-      app.landmarker = await PoseLandmarker.createFromOptions(files, options("CPU"));
+    // CPU by default: the GPU path froze a phone's whole system UI (graphics-driver hang).
+    // `?gpu` in the address tries the GPU first, for phones where it is known to be fine.
+    const wantGpu = new URLSearchParams(location.search).has("gpu");
+    if (wantGpu) {
+      try {
+        app.landmarker = await PoseLandmarker.createFromOptions(files, options("GPU"));
+      } catch (gpuErr) {
+        console.info("GPU tracker unavailable, using CPU", gpuErr);
+      }
     }
+    if (!app.landmarker) app.landmarker = await PoseLandmarker.createFromOptions(files, options("CPU"));
   } catch (err) {
     console.warn("Body tracker failed", err);
     app.trackerFailed = true;
@@ -204,12 +209,26 @@ function renderAwake() {
 
 // ------------------------------------------------------------------ frame loop
 
+// Frames are skipped so that processing never takes more than about half of the time: a phone
+// that is busy every millisecond stops answering taps (and Android then reports "not responding").
+const MAX_FPS = 15;
 function loop() {
   if (!app.running) return;
   const v = els.video;
-  if (v.readyState >= 2 && v.currentTime !== app.lastVideoTime) {
+  const now = performance.now();
+  if (v.readyState >= 2 && v.currentTime !== app.lastVideoTime && now >= app.nextAt) {
     app.lastVideoTime = v.currentTime;
-    processFrame((performance.now() - app.t0) / 1000);
+    processFrame((now - app.t0) / 1000);
+    const took = performance.now() - now;
+    app.busyMs = app.busyMs ? 0.9 * app.busyMs + 0.1 * took : took;
+    app.nextAt = now + Math.max(1000 / MAX_FPS, 2 * app.busyMs);
+    app.fpsFrames = (app.fpsFrames || 0) + 1;
+    if (now - (app.fpsT || 0) > 1000) {
+      app.fps = (app.fpsFrames * 1000) / (now - (app.fpsT || now - 1000));
+      app.fpsFrames = 0;
+      app.fpsT = now;
+      els.perf.textContent = `${app.fps.toFixed(0)} fps · ${app.busyMs.toFixed(0)} ms`;
+    }
   }
   if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(loop);
   else requestAnimationFrame(loop);

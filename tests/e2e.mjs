@@ -36,7 +36,8 @@ try {
     await ctx.grantPermissions(["camera", "screen-wake-lock"]);
     const page = await ctx.newPage();
     const errors = [];
-    page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    // MediaPipe prints its own "INFO: ..." lines through console.error; those are not failures.
+    page.on("console", (m) => { if (m.type() === "error" && !m.text().startsWith("INFO:")) errors.push(m.text()); });
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.addInitScript((m) => localStorage.setItem("rapetitions.settings", JSON.stringify({ mode: m, voice: false })), mode);
     await page.goto(url);
