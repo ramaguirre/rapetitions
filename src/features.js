@@ -76,6 +76,27 @@ export function motionFeatures(rgba, cols = 16, rows = 12) {
   return f;
 }
 
+/**
+ * Averages `f x f` blocks of an RGBA image (w x h) into a (w/f) x (h/f) one. The browser's own
+ * shrink reads only a few pixels per output cell when shrinking a lot, which adds jagged noise;
+ * the app draws the frame at 64 x 48 and averages every pixel here instead.
+ */
+export function boxDownsample(rgba, w, h, f) {
+  const cw = Math.floor(w / f), ch = Math.floor(h / f);
+  const out = new Uint8ClampedArray(cw * ch * 4);
+  const n = f * f;
+  for (let cy = 0; cy < ch; cy++) for (let cx = 0; cx < cw; cx++) {
+    let r = 0, g = 0, b = 0;
+    for (let y = cy * f; y < cy * f + f; y++) for (let x = cx * f; x < cx * f + f; x++) {
+      const i = 4 * (y * w + x);
+      r += rgba[i]; g += rgba[i + 1]; b += rgba[i + 2];
+    }
+    const o = 4 * (cy * cw + cx);
+    out[o] = r / n; out[o + 1] = g / n; out[o + 2] = b / n; out[o + 3] = 255;
+  }
+  return out;
+}
+
 function mid(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }

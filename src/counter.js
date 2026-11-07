@@ -16,20 +16,21 @@
 
 export const DEFAULTS = {
   analysisHz: 20,        // resampling rate for the analysis
-  windowSec: 20,         // history kept for the analysis (>= lockReps * maxPeriod)
+  windowSec: 36,         // history kept for the analysis (>= lockReps * maxPeriod)
   minPeriod: 0.5,        // fastest rep, seconds
-  maxPeriod: 5,          // slowest rep, seconds
+  maxPeriod: 10,         // slowest rep, seconds (a deadlift with pauses)
   lockCorr: 0.5,         // minimum autocorrelation to accept a rhythm
   lockReps: 3,           // cycles that must be seen before counting starts
   stableChecks: 3,       // consecutive analyses that must agree on the period
   periodTolerance: 0.18, // relative spread allowed between those analyses
   minMotion: 0.02,       // minimum spread of the projected signal (feature units)
   minSwing: 0.1,         // minimum rep size (5-95 % range of the projection) to start counting
+  minSignalToNoise: 3,   // rep size over frame-to-frame jitter
   hysteresis: 0.2,       // threshold half-width, as a fraction of the swing
   endAfterPeriods: 2.5,  // a set ends after this many periods without a rep...
   endMinSec: 3,          // ...and never sooner than this
   analyseEverySec: 0.25,
-  windows: [3, 4.5, 6.5, 9, 13, 20], // look-back windows tried, shortest first (seconds)
+  windows: [3, 4.5, 6.5, 9, 13, 19, 27, 34], // look-back windows tried, shortest first (seconds)
 };
 
 export class RepCounter {
@@ -161,8 +162,10 @@ export class RepCounter {
 
   _analyseWindow(frames, tNow, W) {
     const o = this.o;
-    const grid = resample(frames, o.analysisHz);
-    if (!grid || grid.n < o.lockReps * o.minPeriod * o.analysisHz) return null;
+    // Long windows only add slow rhythms, which need no fine time steps: fewer samples, less work.
+    const hz = Math.min(o.analysisHz, Math.max(8, 120 / W));
+    const grid = resample(frames, hz);
+    if (!grid || grid.n < o.lockReps * o.minPeriod * hz) return null;
     const { n, d, X, t0 } = grid;
     const mean = new Float64Array(d);
     for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) mean[j] += X[i * d + j];
@@ -180,10 +183,10 @@ export class RepCounter {
       p[i] = s;
     }
     const points = [];
-    for (let i = 0; i < n; i++) points.push({ t: t0 + i / o.analysisHz, p: p[i] });
+    for (let i = 0; i < n; i++) points.push({ t: t0 + i / hz, p: p[i] });
     const search = { points, period: null, corr: null };
     if (std(p) < o.minMotion) return { search, found: null };
-    const found = findPeriod(p, o.analysisHz, o.minPeriod, o.maxPeriod, o.lockReps, o.lockCorr);
+    const found = findPeriod(p, hz, o.minPeriod, o.maxPeriod, o.lockReps, o.lockCorr);
     if (found) { search.period = found.period; search.corr = found.corr; }
     return { search, found, mean, axis, W };
   }
@@ -201,6 +204,14 @@ export class RepCounter {
     const lo = percentile(recent, 5), hi = percentile(recent, 95);
     const amp = hi - lo;
     if (amp < Math.max(o.minSwing, 2 * o.minMotion)) return null;
+    // Swing against the frame-to-frame jitter: a movement changes smoothly between frames, noise
+    // does not. Jitter from second differences of the raw frames (robust: median absolute value).
+    // A backstop only: point-sampled synthetic clips get down to about 4, real reps far higher.
+    const raw = proj.filter((q) => q.t >= tNow - o.lockReps * period).map((q) => q.p);
+    const d2 = [];
+    for (let i = 2; i < raw.length; i++) d2.push(Math.abs(raw[i] - 2 * raw[i - 1] + raw[i - 2]));
+    const jitter = percentile(d2, 50) / 0.6745 / Math.sqrt(6);
+    if (amp < o.minSignalToNoise * jitter) return null;
     let mid = (lo + hi) / 2;
 
     // Sign: the rest position (where the body dwells) should be "high", so the count lands as the
@@ -228,7 +239,9 @@ export class RepCounter {
       reps += 1;
     }
     L.trace = proj.filter((q) => q.t >= tNow - Math.max(3 * period, 4));
-    if (reps < o.lockReps - 1) return null;
+    // Usually one rep less than lockReps is enough evidence (the next is underway). Slow rhythms
+    // need all of them: two cycles of a slow drift can look like two reps.
+    if (reps < (period > 5 ? o.lockReps : o.lockReps - 1)) return null;
 
     this.lock = L;
     this.state = "counting";
@@ -301,7 +314,7 @@ export function principalAxis(X, n, d, warm) {
   else for (let j = 0; j < d; j++) v[j] = 1 + 0.37 * Math.sin(1.7 * j + 0.3);
   normalise(v);
   const u = new Float64Array(n);
-  for (let it = 0; it < 40; it++) {
+  for (let it = 0; it < 30; it++) {
     for (let i = 0; i < n; i++) {
       let s = 0;
       for (let j = 0; j < d; j++) s += X[i * d + j] * v[j];
@@ -317,7 +330,7 @@ export function principalAxis(X, n, d, warm) {
     let change = 0;
     for (let j = 0; j < d; j++) change += Math.abs(w[j] - v[j]);
     v = w;
-    if (change < 1e-6) break;
+    if (change < 1e-4) break; // the axis only needs to be close: it is refined again next time
   }
   return v;
 }

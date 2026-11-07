@@ -1,6 +1,6 @@
 // RApetitions page: camera, pose tracking, screen kept on, voice count. The method is in counter.js.
 import { RepCounter } from "./counter.js";
-import { PoseFeatures, motionFeatures, SKELETON } from "./features.js";
+import { PoseFeatures, motionFeatures, boxDownsample, SKELETON } from "./features.js";
 import { POSE_OPTIONS, MOTION_OPTIONS } from "./modes.js";
 
 const TEXT = {
@@ -65,9 +65,10 @@ const app = {
 window.__rap = app; // for the browser tests
 
 const small = document.createElement("canvas");
-small.width = 16;
-small.height = 12;
+small.width = 64; // drawn at 64 x 48, then each 4 x 4 block averaged to the 16 x 12 grid
+small.height = 48;
 const smallCtx = small.getContext("2d", { willReadFrequently: true });
+smallCtx.imageSmoothingQuality = "high";
 
 newCounter();
 renderButtons();
@@ -251,7 +252,8 @@ function processFrame(t) {
     app.seenPerson = !!lm;
   } else {
     smallCtx.drawImage(v, 0, 0, small.width, small.height);
-    features = motionFeatures(smallCtx.getImageData(0, 0, small.width, small.height).data, small.width, small.height);
+    const grid = boxDownsample(smallCtx.getImageData(0, 0, small.width, small.height).data, small.width, small.height, 4);
+    features = motionFeatures(grid, 16, 12);
     app.seenPerson = true;
   }
   app.frames += 1;

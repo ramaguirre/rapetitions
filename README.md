@@ -5,6 +5,10 @@ move: after about three reps the app recognises the loop, counts those first rep
 counting out loud. Stop moving for a few seconds and the set closes; start again and a new set
 begins. The screen stays on the whole time (no screensaver, no sleep).
 
+It does not need to see a body: any picture that repeats works. Put the phone at your feet,
+looking up, for deadlifts; under your head for push-ups; beside a rowing machine. Reps from
+about half a second to ten seconds each are counted.
+
 Nothing leaves the phone: the video is analysed in the page and never stored or sent.
 
 ## Use it (Android)
@@ -34,12 +38,14 @@ threshold the signal must cross both ways for a rep.
    phone does not matter).
 2. Every quarter second, the recent past is reduced to the single direction that moves the most
    (principal component), giving one wave. Several look-back windows are tried, shortest first
-   (3 s up to 20 s), so the movement of walking into place does not hide a quick loop.
+   (3 s up to 34 s), so the movement of walking into place does not hide a quick loop, and slow
+   reps (up to 10 s) still fit three times in the longest one.
 3. Autocorrelation of that wave finds the period: how many seconds until the motion repeats. A
    slow drift or fidgeting is rejected because it is not anti-correlated half a cycle later.
 4. When three analyses in a row agree on the period and three cycles are in view, the app
    locks: the direction is frozen and the reps already done are counted retroactively (only those
-   spaced like the rhythm). The number appears by the 3rd or 4th rep.
+   spaced like the rhythm). The number appears by the 3rd rep. Camera noise is kept out by
+   a minimum swing size and a swing-to-jitter check.
 5. From then on each swing through the band (down past it, back up past it) is one rep. The band
    follows slow changes in depth or tempo; 2.5 periods without a rep (at least 3 s) end the set.
 
@@ -51,7 +57,9 @@ No build step, no npm packages. Serve the folder over http and open it:
 
 ```
 python -m http.server 8000      # then http://localhost:8000 (camera works on localhost)
-node --test tests/*.test.mjs    # the method, on synthetic squats, curls, fidgeting, two sets…
+node --test tests/*.test.mjs    # the method on synthetic data: squats, curls, fidgeting, two sets,
+                                # and camera views of push-ups (phone under the head) and
+                                # deadlifts (phone at the feet), 1.2 to 7.5 s per rep
 node tests/e2e.mjs shots/       # headless Chrome with a fake camera clip: counts 10 of 10
 ```
 
