@@ -29,6 +29,7 @@ export const DEFAULTS = {
   endAfterPeriods: 2.5,  // a set ends after this many periods without a rep...
   endMinSec: 3,          // ...and never sooner than this
   analyseEverySec: 0.25,
+  windows: [3, 4.5, 6.5, 9, 13, 20], // look-back windows tried, shortest first (seconds)
 };
 
 export class RepCounter {
@@ -131,48 +132,67 @@ export class RepCounter {
 
   // ---------------------------------------------------------------- searching
 
+  /**
+   * Looks for a rhythm in several look-back windows, shortest first, and keeps the first that has
+   * one. A short window sees only the reps; a long one also holds whatever came before (walking
+   * back from the phone), which can dominate the main direction of motion for many seconds.
+   */
   _analyse(tNow) {
     const o = this.o;
-    const grid = resample(this.frames.filter((fr) => fr.t > this.ignoreBefore), o.analysisHz);
+    const usable = this.frames.filter((fr) => fr.t > this.ignoreBefore);
     this.search = null;
-    if (!grid || grid.n < o.lockReps * o.minPeriod * o.analysisHz) { this.candidates = []; return null; }
+    let found = null;
+    for (const W of o.windows) {
+      if (W < o.lockReps * o.minPeriod) continue;
+      const res = this._analyseWindow(usable.filter((fr) => fr.t >= tNow - W), tNow, W);
+      if (!res) continue;
+      this.search = res.search;            // what the screen shows: the last window looked at
+      if (res.found) { found = res; break; }
+      if (usable.length && usable[0].t > tNow - W) break; // longer windows hold no more frames
+    }
+    if (!found) { this.candidates = []; return null; }
+    this.candidates.push(found.found.period);
+    if (this.candidates.length > o.stableChecks) this.candidates.shift();
+    if (this.candidates.length < o.stableChecks) return null;
+    const med = median(this.candidates);
+    if (this.candidates.some((c) => Math.abs(c - med) > o.periodTolerance * med)) return null;
+    return this._tryLock(tNow, found.mean, found.axis, med, found.W);
+  }
 
+  _analyseWindow(frames, tNow, W) {
+    const o = this.o;
+    const grid = resample(frames, o.analysisHz);
+    if (!grid || grid.n < o.lockReps * o.minPeriod * o.analysisHz) return null;
     const { n, d, X, t0 } = grid;
     const mean = new Float64Array(d);
     for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) mean[j] += X[i * d + j];
     for (let j = 0; j < d; j++) mean[j] /= n;
     for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) X[i * d + j] -= mean[j];
 
-    const v = principalAxis(X, n, d, this._warm);
-    this._warm = v;
+    const warmKey = `${W}`;
+    this._warm = this._warm || {};
+    const axis = principalAxis(X, n, d, this._warm[warmKey]);
+    this._warm[warmKey] = axis;
     const p = new Float64Array(n);
     for (let i = 0; i < n; i++) {
       let s = 0;
-      for (let j = 0; j < d; j++) s += X[i * d + j] * v[j];
+      for (let j = 0; j < d; j++) s += X[i * d + j] * axis[j];
       p[i] = s;
     }
-    const sd = std(p);
     const points = [];
     for (let i = 0; i < n; i++) points.push({ t: t0 + i / o.analysisHz, p: p[i] });
-    this.search = { points, period: null, corr: null };
-    if (sd < o.minMotion) { this.candidates = []; return null; }
-
+    const search = { points, period: null, corr: null };
+    if (std(p) < o.minMotion) return { search, found: null };
     const found = findPeriod(p, o.analysisHz, o.minPeriod, o.maxPeriod, o.lockReps, o.lockCorr);
-    if (!found) { this.candidates = []; return null; }
-    this.search.period = found.period;
-    this.search.corr = found.corr;
-    this.candidates.push(found.period);
-    if (this.candidates.length > o.stableChecks) this.candidates.shift();
-    if (this.candidates.length < o.stableChecks) return null;
-    const med = median(this.candidates);
-    if (this.candidates.some((c) => Math.abs(c - med) > o.periodTolerance * med)) return null;
-
-    return this._tryLock(tNow, mean, v, med);
+    if (found) { search.period = found.period; search.corr = found.corr; }
+    return { search, found, mean, axis, W };
   }
 
-  _tryLock(tNow, mean, axis, period) {
+  _tryLock(tNow, mean, axis, period, W) {
     const o = this.o;
-    const frames = this.frames.filter((fr) => fr.t > this.ignoreBefore);
+    // Reps already done are counted inside the window the rhythm was found in (plus half a cycle),
+    // never in the movement before it.
+    const frames = this.frames.filter((fr) => fr.t > this.ignoreBefore && fr.t >= tNow - W - 0.5 * period);
     const L = { mean, axis: Float64Array.from(axis), period, trace: [], armed: false, lastRepT: -Infinity };
     let proj = frames.map((fr) => ({ t: fr.t, p: this._project(fr.f, L) }));
 
@@ -197,8 +217,16 @@ export class RepCounter {
     L.h = o.hysteresis * amp;
 
     // Count the cycles already done, with the same rule used live.
-    let reps = 0;
-    for (const q of proj) if (this._step(L, q.t, q.p)) reps += 1;
+    const times = [];
+    for (const q of proj) if (this._step(L, q.t, q.p)) times.push(q.t);
+    // Keep only the reps that follow the rhythm: walk back from the newest one and stop at the first
+    // gap that does not look like one cycle (a swing from walking into place, say).
+    let reps = times.length ? 1 : 0;
+    for (let k = times.length - 1; k > 0; k--) {
+      const gap = times[k] - times[k - 1];
+      if (gap < 0.85 * period || gap > 1.3 * period) break;
+      reps += 1;
+    }
     L.trace = proj.filter((q) => q.t >= tNow - Math.max(3 * period, 4));
     if (reps < o.lockReps - 1) return null;
 

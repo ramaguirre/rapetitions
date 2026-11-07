@@ -108,7 +108,7 @@ test("counting starts after about three reps", () => {
   const { events, tl } = runPose([{ rest: 2 }, { reps: 8, period: 2 }]);
   const lock = events.find((e) => e.type === "lock");
   assert.ok(lock, "never locked");
-  assert.ok(lock.t < tl.repEnds[4], `locked late, at ${lock.t.toFixed(1)} s (5th rep ends ${tl.repEnds[4].toFixed(1)} s)`);
+  assert.ok(lock.t < tl.repEnds[3], `locked late, at ${lock.t.toFixed(1)} s (4th rep ends ${tl.repEnds[3].toFixed(1)} s)`);
   assert.ok(lock.reps >= 2 && lock.reps <= 5, `reps at lock ${lock.reps}`);
 });
 
@@ -232,3 +232,48 @@ test("arm curls: only the forearms move", () => {
   }
   assert.equal(counter.total, 10);
 });
+
+/** Locks within `maxRep` reps even after a big non-repeating movement (walking back from the phone). */
+function lockAfterWalkIn({ period, mode }) {
+  const r = rng(31);
+  const reps = 8, walk = 6;
+  const repEnds = Array.from({ length: reps }, (_, k) => walk + (k + 1) * period);
+  const end = walk + reps * period;
+  const counter = new RepCounter(mode === "pose" ? POSE_OPTIONS : MOTION_OPTIONS);
+  const pf = new PoseFeatures();
+  let lock = null;
+  for (let t = 0; t < end + 4; t += 1 / 15) {
+    let f;
+    if (mode === "pose") {
+      const lm = squatLandmarks(t >= walk && t < end ? (1 - Math.cos((2 * Math.PI * (t - walk)) / period)) / 2 * 0.6 : 0, r);
+      if (t < walk) for (const p of lm) { p.x += 0.4 * (1 - t / walk); p.y -= 0.1 * Math.sin(t * 3); } // walking in from the side
+      f = pf.compute(lm, 9 / 16);
+    } else {
+      const cols = 16, rows = 12, rgba = new Uint8ClampedArray(cols * rows * 4);
+      const cx = t < walk ? 1 + 7 * (t / walk) : 8; // a big dark shape walks in...
+      const ph = t >= walk && t < end ? ((t - walk) / period) % 1 : 0;
+      const cy = 4 + 2.5 * (1 - Math.cos(2 * Math.PI * ph)) / 2; // ...then bobs a little
+      for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+        const body = Math.abs(x - cx) < 2.5 && y > cy;
+        const v = (body ? 40 : 150) + 20 * Math.sin(x / 2.5) + 6 * gauss(r);
+        const i = 4 * (y * cols + x);
+        rgba[i] = rgba[i + 1] = rgba[i + 2] = v; rgba[i + 3] = 255;
+      }
+      f = motionFeatures(rgba, cols, rows);
+    }
+    for (const e of counter.push(t, f)) if (e.type === "lock" && !lock) lock = e;
+  }
+  return { lock, repEnds, counter, reps };
+}
+
+for (const mode of ["motion", "pose"]) {
+  for (const period of [0.8, 1.2, 2]) {
+    test(`${mode}: short loops (${period} s) lock by the 4th rep after walking in`, () => {
+      const { lock, repEnds, counter, reps } = lockAfterWalkIn({ period, mode });
+      assert.ok(lock, "never locked");
+      const n = repEnds.filter((te) => te <= lock.t).length;
+      assert.ok(n <= 4, `locked after ${n} reps`);
+      assert.equal(counter.total, reps);
+    });
+  }
+}

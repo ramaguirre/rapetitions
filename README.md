@@ -32,12 +32,14 @@ threshold the signal must cross both ways for a rep.
 1. Each frame becomes a list of numbers: in Motion mode a 16 × 12 grey thumbnail, normalised by
    its own mean and spread; in Body mode, landmark positions (in torso lengths, so distance to the
    phone does not matter).
-2. Every quarter second, the last 20 s are reduced to the single direction that moves the most
-   (principal component), giving one wave.
+2. Every quarter second, the recent past is reduced to the single direction that moves the most
+   (principal component), giving one wave. Several look-back windows are tried, shortest first
+   (3 s up to 20 s), so the movement of walking into place does not hide a quick loop.
 3. Autocorrelation of that wave finds the period: how many seconds until the motion repeats. A
    slow drift or fidgeting is rejected because it is not anti-correlated half a cycle later.
 4. When three analyses in a row agree on the period and three cycles are in view, the app
-   locks: the direction is frozen and the reps already done are counted retroactively.
+   locks: the direction is frozen and the reps already done are counted retroactively (only those
+   spaced like the rhythm). The number appears by the 3rd or 4th rep.
 5. From then on each swing through the band (down past it, back up past it) is one rep. The band
    follows slow changes in depth or tempo; 2.5 periods without a rep (at least 3 s) end the set.
 
