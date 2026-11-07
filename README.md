@@ -17,7 +17,7 @@ Buttons:
 
 | Button | What it does |
 |---|---|
-| Mode: Body / Motion | **Body** tracks your skeleton (best for squats, push-ups, curls, jumping jacks). **Motion** watches the whole picture instead, for anything that repeats when no full body is in view (rowing machine, skipping rope, a single arm). |
+| Mode: Motion / Body | **Motion** (default) watches the whole picture as a coarse grey thumbnail: works for any repeated movement, full body in view or not. Each thumbnail is normalised by its own brightness and contrast, so the camera's automatic exposure and white balance do not look like movement. **Body** tracks your skeleton instead (MediaPipe Pose, on the CPU). |
 | Flip | Front / back camera |
 | Voice | Says each number aloud |
 | End set | Closes the set now, without waiting |
@@ -29,8 +29,9 @@ threshold the signal must cross both ways for a rep.
 
 ## How it counts
 
-1. Each frame becomes a list of numbers: body landmark positions (MediaPipe Pose, in torso
-   lengths, so distance to the phone does not matter) or, in Motion mode, a 16 × 12 grey thumbnail.
+1. Each frame becomes a list of numbers: in Motion mode a 16 × 12 grey thumbnail, normalised by
+   its own mean and spread; in Body mode, landmark positions (in torso lengths, so distance to the
+   phone does not matter).
 2. Every quarter second, the last 20 s are reduced to the single direction that moves the most
    (principal component), giving one wave.
 3. Autocorrelation of that wave finds the period: how many seconds until the motion repeats. A

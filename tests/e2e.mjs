@@ -39,7 +39,7 @@ try {
     // MediaPipe prints its own "INFO: ..." lines through console.error; those are not failures.
     page.on("console", (m) => { if (m.type() === "error" && !m.text().startsWith("INFO:")) errors.push(m.text()); });
     page.on("pageerror", (e) => errors.push(String(e)));
-    await page.addInitScript((m) => localStorage.setItem("rapetitions.settings", JSON.stringify({ mode: m, voice: false })), mode);
+    await page.addInitScript((m) => localStorage.setItem("rapetitions.settings.v2", JSON.stringify({ mode: m, voice: false })), mode);
     await page.goto(url);
     await page.click("#start");
     const t0 = Date.now();
@@ -74,6 +74,14 @@ try {
     console.log(`     ${mode}: status "${s.status}", count ${s.count}, "${s.awake}", ${((Date.now() - t0) / 1000).toFixed(0)} s`);
     await ctx.close();
   }
+  // A phone with nothing saved, or with the old settings key, starts in Motion mode.
+  const ctx = await browser.newContext({ locale: "en-US" });
+  const page = await ctx.newPage();
+  await page.addInitScript(() => localStorage.setItem("rapetitions.settings", JSON.stringify({ mode: "body" })));
+  await page.goto(url);
+  const modeText = await page.textContent("#mode");
+  check(modeText === "Mode: Motion", `default mode is Motion (${modeText})`);
+  await ctx.close();
 } finally {
   await browser.close();
   server.kill();

@@ -53,7 +53,10 @@ for (const el of document.querySelectorAll("[data-i18n]")) {
   if (typeof v === "string") el.textContent = v;
 }
 
-const settings = load("rapetitions.settings", { mode: "body", voice: true, facing: "user" });
+// Motion is the default (director, 2026-11-07: it works best on the phone). The key changed with
+// that decision, so phones that saved "body" under the old key start in Motion once.
+const SETTINGS_KEY = "rapetitions.settings.v2";
+const settings = load(SETTINGS_KEY, { mode: "motion", voice: true, facing: "user" });
 const app = {
   running: false, stream: null, landmarker: null, trackerFailed: false,
   counter: null, pose: new PoseFeatures(), lastPose: null, lastVideoTime: -1, frames: 0,
@@ -385,7 +388,7 @@ function load(key, fallback) {
 
 function save() {
   try {
-    localStorage.setItem("rapetitions.settings", JSON.stringify(settings));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch {
     /* private mode: settings last for this visit only */
   }

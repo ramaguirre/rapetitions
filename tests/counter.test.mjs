@@ -165,24 +165,52 @@ test("random fidgeting counts nothing", () => {
   }
 });
 
-test("motion grid: a bright patch moving up and down", () => {
-  const cols = 16, rows = 12, period = 1.8, reps = 12;
-  const r = rng(5);
+/**
+ * Motion-mode clip on the 16 x 12 grid. `move` says whether the bright patch does its reps;
+ * `awb(t)` returns {gain, offset} applied to the whole picture, like auto exposure / white balance.
+ */
+function runMotion({ reps = 12, period = 1.8, move = true, awb = () => ({ gain: 1, offset: 0 }), seed = 5 } = {}) {
+  const cols = 16, rows = 12;
+  const r = rng(seed);
   const counter = new RepCounter(MOTION_OPTIONS);
   const end = 2 + reps * period;
   for (let t = 0; t < end + 5; t += 1 / 24) {
-    const ph = t > 2 && t < end ? ((t - 2) / period) % 1 : 0;
+    const ph = move && t > 2 && t < end ? ((t - 2) / period) % 1 : 0;
     const cy = 2 + 7 * (1 - Math.cos(2 * Math.PI * ph)) / 2;
+    const { gain, offset } = awb(t);
     const rgba = new Uint8ClampedArray(cols * rows * 4);
     for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
       const inside = Math.abs(y - cy) < 1.5 && x > 5 && x < 11;
-      const v = (inside ? 200 : 60) + 6 * gauss(r);
+      // Background texture; levels stay below white even at +30 % gain. Clipped pixels do not
+      // follow a brightness change, so a picture that saturates at the pace of the reps could still fool it.
+      const scene = (inside ? 140 : 60) + 25 * Math.sin(x / 3) + 15 * Math.cos(y / 2);
+      const v = gain * scene + offset + 6 * gauss(r);
       const i = 4 * (y * cols + x);
       rgba[i] = rgba[i + 1] = rgba[i + 2] = v; rgba[i + 3] = 255;
     }
     counter.push(t, motionFeatures(rgba, cols, rows));
   }
-  assert.equal(counter.total, reps);
+  return counter;
+}
+
+test("motion grid: a bright patch moving up and down", () => {
+  assert.equal(runMotion().total, 12);
+});
+
+test("motion grid: auto white balance drifting and jumping while moving", () => {
+  const awb = (t) => ({ gain: 1 + 0.25 * Math.sin(t / 1.1), offset: t % 9 < 4.5 ? 0 : -20 });
+  assert.equal(runMotion({ awb }).total, 12);
+});
+
+test("motion grid: auto white balance pulsing at a rep-like pace, nobody moving", () => {
+  for (const period of [1.2, 2, 3]) {
+    const awb = (t) => ({ gain: 1 + 0.3 * Math.sin((2 * Math.PI * t) / period), offset: 10 * Math.cos((2 * Math.PI * t) / period) });
+    assert.equal(runMotion({ move: false, awb, reps: 15 }).total, 0, `period ${period}`);
+  }
+});
+
+test("motion grid: a still scene counts nothing", () => {
+  assert.equal(runMotion({ move: false, reps: 20 }).total, 0);
 });
 
 test("arm curls: only the forearms move", () => {

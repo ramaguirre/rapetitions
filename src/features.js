@@ -52,13 +52,27 @@ export class PoseFeatures {
  * Motion features: the frame shrunk to a coarse grey grid (default 16 x 12). Works for any repeated
  * movement, even when no full body is in view (an arm, a rowing machine, a skipping rope).
  * `rgba` are the bytes of a `cols x rows` image (canvas getImageData).
+ *
+ * Each grid is normalised by its own mean and spread. The camera's automatic exposure and white
+ * balance brighten or darken the whole picture at once (a gain and an offset on every cell); after
+ * normalising, those shifts cancel and only things that moved remain.
  */
 export function motionFeatures(rgba, cols = 16, rows = 12) {
-  const f = new Array(cols * rows);
-  for (let i = 0; i < cols * rows; i++) {
+  const n = cols * rows;
+  const f = new Array(n);
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
     const r = rgba[4 * i], g = rgba[4 * i + 1], b = rgba[4 * i + 2];
     f[i] = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    sum += f[i];
   }
+  const mean = sum / n;
+  let ss = 0;
+  for (let i = 0; i < n; i++) ss += (f[i] - mean) ** 2;
+  const sd = Math.sqrt(ss / n);
+  // A flat picture (lens covered, dark room) has no structure to normalise: keep it flat.
+  const k = sd > 0.01 ? 1 / sd : 0;
+  for (let i = 0; i < n; i++) f[i] = (f[i] - mean) * k;
   return f;
 }
 
