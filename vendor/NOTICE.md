@@ -1,0 +1,12 @@
+# Third-party files
+
+- `mediapipe/` — `@mediapipe/tasks-vision` 0.10.21 from npm (`vision_bundle.mjs`, `wasm/`), Apache License 2.0, unmodified.
+- `../models/pose_landmarker_lite.task` — MediaPipe Pose Landmarker (lite, float16, v1) from Google's model storage, Apache License 2.0.
+
+SHA-256:
+    40f4123dfcd75cfa58add046919cc6f52fde66f009ff582997c09ba54c6ba27c  vendor/mediapipe/vision_bundle.mjs
+    4a97e2520ba506c680ecd6ba6acfb146888afa0e2746d57f205352bc6ebb82eb  vendor/mediapipe/wasm/vision_wasm_internal.js
+    f00ec4731faa23b3e714d00e88d4d10e2df5c0a427d3a2b4ae6e3526fdd14ef7  vendor/mediapipe/wasm/vision_wasm_internal.wasm
+    927def7b465c51b86e4b3060f93646aca4e27121f4b8fc0483786e407ea9cf1f  vendor/mediapipe/wasm/vision_wasm_nosimd_internal.js
+    3821ea9b1f7fb8c549ef2a064ef5c85750bf375c545a49fd6eea0df44a95f1f4  vendor/mediapipe/wasm/vision_wasm_nosimd_internal.wasm
+    59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a  models/pose_landmarker_lite.task
