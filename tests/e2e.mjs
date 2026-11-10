@@ -3,7 +3,7 @@
 // 2. Body mode must load the tracker (no person in the clip) and run without console errors.
 import { createRequire } from "node:module";
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,7 +40,7 @@ try {
     page.on("console", (m) => { if (m.type() === "error" && !m.text().startsWith("INFO:")) errors.push(m.text()); });
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.addInitScript((m) => {
-      localStorage.setItem("rapetitions.settings.v2", JSON.stringify({ mode: m, voice: true }));
+      localStorage.setItem("rapetitions.settings.v2", JSON.stringify({ mode: m, voice: true, clips: m === "motion" }));
       // Record what the voice says instead of speaking.
       window.__said = [];
       if (window.speechSynthesis) {
@@ -92,6 +92,40 @@ try {
       }
       check(s2.rests.length === 1 && s2.rests[0] > 60 && s2.rests[0] < 90, `second set ends the rest (${s2.rests.map((x) => x.toFixed(0))} s)`);
       check(/^Sets: 10, rest 1:\d\d, 10 · total 20$/.test(s2.line), `rest shown between sets ("${s2.line}")`);
+      // Clips: one looping GIF per set, one rep long (the clip's period is 2 s), kept on the phone.
+      for (const t1 = Date.now(); Date.now() - t1 < 10000;) {
+        if ((await page.evaluate(() => window.__rap.clipsSaved)) >= 2) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      await page.click("#clipsbtn");
+      await page.waitForSelector("#cliplist li img");
+      await page.waitForFunction(() => [...document.querySelectorAll("#cliplist img")].every((i) => i.complete && i.naturalWidth));
+      const panel = await page.evaluate(() => ({
+        items: document.querySelectorAll("#cliplist li").length, info: document.getElementById("clipsinfo").textContent,
+        img: [...document.querySelectorAll("#cliplist img")].map((i) => `${i.naturalWidth}x${i.naturalHeight}`),
+        line: document.querySelector("#cliplist li").textContent,
+      }));
+      check(panel.items === 2, `two clips saved, one per set (${panel.info}; ${panel.img.join(", ")})`);
+      check(/10 reps · 2\.\d s per rep/.test(panel.line), `clip labelled with the set ("${panel.line}")`);
+      const bytes = await page.evaluate(async () => {
+        const { listClips } = await import("./src/clipstore.js");
+        const [c] = await listClips();
+        return Array.from(new Uint8Array(await c.gif.arrayBuffer()));
+      });
+      const gifPath = path.join(work, "clip.gif");
+      writeFileSync(gifPath, Buffer.from(bytes));
+      if (shots) writeFileSync(path.join(shots, "clip.gif"), Buffer.from(bytes));
+      const info = JSON.parse(execFileSync("python3", ["-c", `
+import sys, json
+from PIL import Image
+im = Image.open(sys.argv[1]); d = 0
+for f in range(im.n_frames):
+    im.seek(f); d += im.info.get("duration", 0)
+print(json.dumps({"n": im.n_frames, "ms": d, "size": im.size, "loop": im.info.get("loop")}))`, gifPath], { encoding: "utf8" }));
+      check(info.n >= 10 && info.n <= 20 && Math.abs(info.ms - 2000) < 300 && info.loop === 0,
+        `clip is one looping rep: ${info.n} frames, ${info.ms} ms, ${info.size.join("x")}, ${(bytes.length / 1e3).toFixed(0)} kB`);
+      if (shots) await page.screenshot({ path: path.join(shots, "clips.png") });
+      await page.click("#clipsclose");
       check(JSON.stringify(s.sets) === "[10]", `motion mode counts 10 reps in one set (got sets ${JSON.stringify(s.sets)}, total ${s.total})`);
     } else {
       check(s.tracker, "body tracker loaded");
@@ -111,6 +145,8 @@ try {
   await page.goto(url);
   const modeText = await page.textContent("#mode");
   check(modeText === "Mode: Motion", `default mode is Motion (${modeText})`);
+  const clipsText = await page.textContent("#clipsbtn");
+  check(clipsText === "Clips: off", `clips are off by default (${clipsText})`);
   await ctx.close();
 } finally {
   await browser.close();

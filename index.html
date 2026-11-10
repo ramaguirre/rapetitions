@@ -31,16 +31,28 @@
       <p data-i18n="intro2">After a few reps it finds the rhythm and counts by itself. The first reps are included.</p>
       <button id="start" class="primary" data-i18n="start">Start</button>
       <p id="loadmsg" class="small"></p>
+      <button id="clipsintro" class="secondary" data-i18n="clips">Clips</button>
     </section>
 
     <nav id="controls" hidden>
       <button id="mode" title="Body / Motion"></button>
       <button id="flip" data-i18n="flip">Flip</button>
       <button id="voice"></button>
+      <button id="clipsbtn"></button>
       <button id="endset" data-i18n="endset">End set</button>
       <button id="reset" data-i18n="reset">Reset</button>
       <button id="stop" data-i18n="stop">Stop</button>
     </nav>
+    <section id="clips" hidden>
+      <header>
+        <h2 data-i18n="clips">Clips</h2>
+        <button id="clipsclose" data-i18n="close">Close</button>
+      </header>
+      <label class="switch"><input type="checkbox" id="clipson"> <span data-i18n="clipsSave">Save one rep of each set as a looping clip</span></label>
+      <p class="small" data-i18n="clipsPrivate">Clips stay on this phone. Nothing is uploaded; Share sends a clip only when you choose.</p>
+      <p id="clipsinfo" class="small"></p>
+      <ul id="cliplist"></ul>
+    </section>
     <div id="awake" hidden></div>
     <div id="perf"></div>
   </main>

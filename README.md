@@ -11,7 +11,9 @@ It does not need to see a body: any picture that repeats works. Put the phone at
 looking up, for deadlifts; under your head for push-ups; beside a rowing machine. Reps from
 about half a second to ten seconds each are counted.
 
-Nothing leaves the phone: the video is analysed in the page and never stored or sent.
+Nothing leaves the phone: the video is analysed in the page and never sent. Optionally (**Clips**,
+off by default) the app keeps one rep of each set as a small looping GIF, stored only on the phone
+until you delete it; **Share** sends one to another app only when you press it.
 
 ## Use it (Android)
 
@@ -27,6 +29,7 @@ Buttons:
 | Flip | Front / back camera |
 | Voice | Says each rep number and each minute of rest aloud |
 | End set | Closes the set now, without waiting |
+| Clips: on / off | Opens the clips: the switch to save one rep per set, and the saved clips (newest first) with **Share** and **Delete**. Also on the start screen. |
 | Reset | Clears all sets and rests |
 | Stop | Turns the camera off |
 
@@ -53,6 +56,14 @@ threshold the signal must cross both ways for a rep.
 
 All of this is in `src/counter.js` (rest clock: `src/rest.js`), with no browser code, so it is tested in Node.
 
+Clips: a rep is counted as the body comes back to rest, so one rep runs from one count to the
+next (rest, bottom, rest) and loops cleanly. The first rep of a set has no start, so it is never
+used; of the others the app keeps the one closest to the set's typical length. While clips are on,
+the last 12 s are kept in memory as 240-pixel frames at 8 per second; when the set ends, the kept
+rep becomes a GIF (one palette for the clip, unchanged pixels left transparent) in a background
+worker. About 0.1 to 1 MB per clip. Code: `src/clip.js`, `src/gif.js` (tested in Node),
+`src/gifworker.js`, `src/clipstore.js`.
+
 ## Develop
 
 No build step, no npm packages. Serve the folder over http and open it:
@@ -62,7 +73,8 @@ python -m http.server 8000      # then http://localhost:8000 (camera works on lo
 node --test tests/*.test.mjs    # the method on synthetic data: squats, curls, fidgeting, two sets,
                                 # and camera views of push-ups (phone under the head) and
                                 # deadlifts (phone at the feet), 1.2 to 7.5 s per rep
-node tests/e2e.mjs shots/       # headless Chrome with a fake camera clip: counts 10 of 10
+node tests/e2e.mjs shots/       # headless Chrome with a fake camera clip: counts 10 of 10,
+                                # rest clock, and one looping clip saved per set
 ```
 
 `tests/e2e.mjs` needs Playwright and Python 3. To try it on the phone from a PC on the same Wi-Fi

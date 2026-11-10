@@ -72,7 +72,7 @@ export class RepCounter {
   /**
    * Adds one frame. `t` in seconds (increasing); `features` an array of numbers, or null when
    * nothing was seen in this frame (no person). Returns the events it caused:
-   * {type: "lock", period, reps, t}, {type: "rep", reps, total, t}, {type: "setEnd", reps, total, lastRepT}.
+   * {type: "lock", period, reps, t, repTimes}, {type: "rep", reps, total, t}, {type: "setEnd", reps, total, lastRepT}.
    */
   push(t, features) {
     const o = this.o;
@@ -248,7 +248,8 @@ export class RepCounter {
     this.current = reps;
     this.total += reps;
     if (!Number.isFinite(L.lastRepT)) L.lastRepT = tNow;
-    return [{ type: "lock", period, reps, total: this.total, t: tNow }];
+    // repTimes: when each rep already counted ended, so the page can find one whole rep (clips).
+    return [{ type: "lock", period, reps, total: this.total, t: tNow, repTimes: times.slice(-reps) }];
   }
 
   // ---------------------------------------------------------------- counting

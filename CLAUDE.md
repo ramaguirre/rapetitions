@@ -12,7 +12,11 @@ on. Same pattern as take_recorder: plain HTML/JS, no build, GitHub Pages, works 
 - MediaPipe is vendored (`vendor/mediapipe`, `models/`), same-origin, so the app works offline.
   Do not switch to a CDN.
 - Bump `VERSION` in `sw.js` whenever a shipped file changes.
-- Nothing is recorded or uploaded; keep it that way.
+- Nothing is uploaded; keep it that way. The one recording is optional (director, 2026-11-10): a
+  looping clip of one rep per set, off by default, kept only on the phone (IndexedDB), kept until the
+  user deletes it, and sent elsewhere only when the user presses Share.
+- Clip choice and frames are in `src/clip.js`, the GIF encoder in `src/gif.js` (no browser APIs,
+  tested in Node); the encoder runs in a worker so counting never stalls.
 
 ## Tracking (RAMonitor)
 

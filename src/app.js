@@ -3,6 +3,8 @@ import { RepCounter } from "./counter.js";
 import { PoseFeatures, motionFeatures, boxDownsample, SKELETON } from "./features.js";
 import { POSE_OPTIONS, MOTION_OPTIONS } from "./modes.js";
 import { RestTimer, clock } from "./rest.js";
+import { RepPicker, clipFrames, clipSize, CLIP } from "./clip.js";
+import { addClip, listClips, deleteClip } from "./clipstore.js";
 
 const TEXT = {
   en: {
@@ -22,6 +24,12 @@ const TEXT = {
     rest: (c) => `Rest ${c}`, restBetween: (c) => `rest ${c}`,
     minutes: (m) => (m === 1 ? "1 minute" : `${m} minutes`),
     awake: "Screen stays on", asleep: "Screen may sleep",
+    clipsOn: "Clips: on", clipsOff: "Clips: off", clips: "Clips", close: "Close",
+    clipsSave: "Save one rep of each set as a looping clip",
+    clipsPrivate: "Clips stay on this phone. Nothing is uploaded; Share sends a clip only when you choose.",
+    clipsInfo: (n, size) => (n ? `${n} clip${n === 1 ? "" : "s"} · ${size}` : "No clips yet"),
+    clipLine: (reps, sec) => `${reps} reps · ${sec} s per rep`,
+    share: "Share", del: "Delete", delAsk: "Delete this clip?",
   },
   es: {
     ready: "Listo", start: "Comenzar", flip: "Girar", endset: "Fin serie", reset: "Reiniciar", stop: "Detener",
@@ -40,6 +48,12 @@ const TEXT = {
     rest: (c) => `Descanso ${c}`, restBetween: (c) => `descanso ${c}`,
     minutes: (m) => (m === 1 ? "1 minuto" : `${m} minutos`),
     awake: "Pantalla siempre encendida", asleep: "La pantalla puede apagarse",
+    clipsOn: "Clips: sí", clipsOff: "Clips: no", clips: "Clips", close: "Cerrar",
+    clipsSave: "Guardar una repetición de cada serie como clip en bucle",
+    clipsPrivate: "Los clips quedan en este teléfono. No se sube nada; Compartir envía un clip solo cuando tú eliges.",
+    clipsInfo: (n, size) => (n ? `${n} clip${n === 1 ? "" : "s"} · ${size}` : "Aún no hay clips"),
+    clipLine: (reps, sec) => `${reps} repeticiones · ${sec} s por repetición`,
+    share: "Compartir", del: "Borrar", delAsk: "¿Borrar este clip?",
   },
 };
 const lang = (navigator.language || "en").toLowerCase().startsWith("es") ? "es" : "en";
@@ -52,6 +66,8 @@ const els = {
   status: $("status"), sets: $("sets"), intro: $("intro"), start: $("start"), loadmsg: $("loadmsg"),
   controls: $("controls"), mode: $("mode"), flip: $("flip"), voice: $("voice"), endset: $("endset"),
   reset: $("reset"), stop: $("stop"), awake: $("awake"), perf: $("perf"), rest: $("rest"),
+  clipsBtn: $("clipsbtn"), clipsIntro: $("clipsintro"), clips: $("clips"), clipsClose: $("clipsclose"),
+  clipsOn: $("clipson"), clipsInfo: $("clipsinfo"), clipList: $("cliplist"),
 };
 for (const el of document.querySelectorAll("[data-i18n]")) {
   const v = T[el.dataset.i18n];
@@ -61,11 +77,13 @@ for (const el of document.querySelectorAll("[data-i18n]")) {
 // Motion is the default (director, 2026-11-07: it works best on the phone). The key changed with
 // that decision, so phones that saved "body" under the old key start in Motion once.
 const SETTINGS_KEY = "rapetitions.settings.v2";
-const settings = load(SETTINGS_KEY, { mode: "motion", voice: true, facing: "user" });
+// Clips are off until the user turns them on (director, 2026-11-10: kept on the phone, shareable).
+const settings = load(SETTINGS_KEY, { mode: "motion", voice: true, facing: "user", clips: false });
 const app = {
   running: false, stream: null, landmarker: null, trackerFailed: false,
   counter: null, pose: new PoseFeatures(), lastPose: null, lastVideoTime: -1, frames: 0,
   wakeLock: null, seenPerson: false, t0: performance.now(), nextAt: 0, busyMs: 0, rest: new RestTimer(),
+  picker: new RepPicker(), clipBuf: [], clipKept: null, lastCapT: -Infinity, clipsSaved: 0,
 };
 window.__rap = app; // for the browser tests
 
@@ -101,6 +119,8 @@ els.voice.addEventListener("click", () => {
 els.endset.addEventListener("click", () => handle(app.counter.endSet()));
 els.reset.addEventListener("click", () => {
   app.counter.resetAll();
+  app.picker.reset();
+  app.clipKept = null;
   app.rest.reset();
   renderRest();
   renderCount(false);
@@ -143,6 +163,7 @@ async function start() {
 
 function stop() {
   app.running = false;
+  app.clipBuf = []; // free the clip frames; a set in progress keeps its chosen rep
   if (app.stream) for (const tr of app.stream.getTracks()) tr.stop();
   app.stream = null;
   if (app.wakeLock) app.wakeLock.release().catch(() => {});
@@ -264,6 +285,7 @@ function processFrame(t) {
     app.seenPerson = true;
   }
   app.frames += 1;
+  if (settings.clips) captureClipFrame(t);
   handle(app.counter.push(t, features));
   drawOverlay();
   drawTrace();
@@ -273,14 +295,16 @@ function processFrame(t) {
 function handle(events) {
   for (const e of events) {
     if (e.type === "lock") {
+      for (const rt of e.repTimes ?? []) clipRep(rt);
       app.rest.stop(e.t, e.reps, e.period);
       renderRest();
       renderCount(true);
       renderSets();
       say(String(e.reps));
     }
-    if (e.type === "rep") { renderCount(true); say(String(e.reps)); }
+    if (e.type === "rep") { clipRep(e.t); renderCount(true); say(String(e.reps)); }
     if (e.type === "setEnd") {
+      saveClip(e.reps);
       if (e.reps > 0) app.rest.start(e.lastRepT ?? now());
       renderRest();
       renderCount(false);
@@ -397,12 +421,178 @@ function drawTrace() {
 function renderButtons() {
   els.mode.textContent = settings.mode === "body" ? T.body : T.motion;
   els.voice.textContent = settings.voice ? T.voiceOn : T.voiceOff;
+  els.clipsBtn.textContent = settings.clips ? T.clipsOn : T.clipsOff;
+  els.clipsBtn.classList.toggle("on", settings.clips);
+  els.clipsOn.checked = settings.clips;
 }
+
+// ------------------------------------------------------------------ rep clips
+// Optional (off by default). The last few seconds are kept as small frames in memory; when a rep
+// is counted, the picker decides whether it is the set's most typical rep so far, and if so its
+// frames are kept. When the set ends, those frames become a looping GIF (encoded in a worker) that
+// is stored on the phone. Nothing is sent anywhere.
+
+const cap = document.createElement("canvas");
+const capCtx = cap.getContext("2d", { willReadFrequently: true });
+
+function captureClipFrame(t) {
+  const v = els.video;
+  if (!v.videoWidth || t - app.lastCapT < 1 / CLIP.fps - 0.01) return;
+  app.lastCapT = t;
+  const { w, h } = clipSize(v.videoWidth, v.videoHeight);
+  if (cap.width !== w || cap.height !== h) { cap.width = w; cap.height = h; app.clipBuf = []; }
+  // Same picture as the screen: mirrored for the front camera, with the skeleton in Body mode.
+  const mirror = els.stage.classList.contains("mirror");
+  capCtx.setTransform(mirror ? -1 : 1, 0, 0, 1, mirror ? w : 0, 0);
+  capCtx.drawImage(v, 0, 0, w, h);
+  const lm = app.lastPose;
+  if (lm) {
+    capCtx.lineWidth = 2;
+    capCtx.strokeStyle = "rgb(56, 211, 159)";
+    capCtx.beginPath();
+    for (const [a, b] of SKELETON) {
+      if ((lm[a].visibility ?? 1) < 0.3 || (lm[b].visibility ?? 1) < 0.3) continue;
+      capCtx.moveTo(lm[a].x * w, lm[a].y * h);
+      capCtx.lineTo(lm[b].x * w, lm[b].y * h);
+    }
+    capCtx.stroke();
+  }
+  capCtx.setTransform(1, 0, 0, 1, 0, 0);
+  app.clipBuf.push({ t, w, h, data: capCtx.getImageData(0, 0, w, h).data });
+  while (app.clipBuf.length && app.clipBuf[0].t < t - CLIP.keepSec) app.clipBuf.shift();
+}
+
+function clipRep(t) {
+  if (!settings.clips) return;
+  const r = app.picker.rep(t, app.clipBuf.length ? app.clipBuf[0].t : Infinity);
+  if (!r) return;
+  const frames = clipFrames(app.clipBuf, r.start, r.end);
+  if (frames.length >= 2) app.clipKept = { frames, seconds: r.end - r.start };
+}
+
+let worker = null, jobs = 0;
+const pending = new Map();
+function encode(frames, w, h) {
+  const id = ++jobs;
+  const msg = { id, w, h, frames: frames.map((f) => ({ data: f.data, delay: f.delay })) };
+  return new Promise((resolve, reject) => {
+    try {
+      if (!worker) {
+        worker = new Worker(new URL("./gifworker.js", import.meta.url), { type: "module" });
+        worker.onmessage = (e) => {
+          const job = pending.get(e.data.id);
+          pending.delete(e.data.id);
+          if (e.data.error) job?.reject(new Error(e.data.error));
+          else job?.resolve(e.data.gif);
+        };
+      }
+      pending.set(id, { resolve, reject });
+      worker.postMessage(msg);
+    } catch (err) {
+      // No module workers: encode here (the set is over, so a short pause does no harm).
+      import("./gif.js").then((m) => resolve(m.encodeGif(msg.frames, w, h)), reject);
+    }
+  });
+}
+
+async function saveClip(reps) {
+  const kept = app.clipKept;
+  app.picker.reset();
+  app.clipKept = null;
+  if (!settings.clips || !kept || reps < 2) return;
+  const { w, h } = kept.frames[0];
+  try {
+    const gif = await encode(kept.frames, w, h);
+    await addClip({
+      date: new Date().toISOString(), reps, seconds: kept.seconds, mode: settings.mode, w, h,
+      gif: new Blob([gif], { type: "image/gif" }),
+    });
+    app.clipsSaved += 1;
+    if (!els.clips.hidden) renderClips();
+  } catch (err) {
+    console.warn("Clip not saved", err);
+  }
+}
+
+// The Clips panel: list, share, delete, and the on/off switch.
+const urls = [];
+async function renderClips() {
+  let list = [];
+  try { list = await listClips(); } catch (err) { console.warn("Clips unavailable", err); }
+  for (const u of urls.splice(0)) URL.revokeObjectURL(u);
+  const bytes = list.reduce((a, c) => a + (c.gif?.size || 0), 0);
+  els.clipsInfo.textContent = T.clipsInfo(list.length, bytes < 1e6 ? `${Math.ceil(bytes / 1e3)} kB` : `${(bytes / 1e6).toFixed(1)} MB`);
+  els.clipList.replaceChildren(...list.map((c) => {
+    const li = document.createElement("li");
+    const img = document.createElement("img");
+    const url = URL.createObjectURL(c.gif);
+    urls.push(url);
+    img.src = url;
+    img.alt = "";
+    img.width = c.w;
+    img.height = c.h;
+    const info = document.createElement("div");
+    const when = document.createElement("div");
+    when.className = "when";
+    when.textContent = new Date(c.date).toLocaleString(lang === "es" ? "es" : "en", { dateStyle: "medium", timeStyle: "short" });
+    const what = document.createElement("div");
+    what.textContent = T.clipLine(c.reps, c.seconds.toFixed(1));
+    const share = document.createElement("button");
+    share.textContent = T.share;
+    share.addEventListener("click", () => shareClip(c));
+    const del = document.createElement("button");
+    del.textContent = T.del;
+    del.addEventListener("click", async () => {
+      if (!confirm(T.delAsk)) return;
+      await deleteClip(c.id);
+      renderClips();
+    });
+    const row = document.createElement("div");
+    row.className = "row";
+    row.append(share, del);
+    info.append(when, what, row);
+    li.append(img, info);
+    return li;
+  }));
+}
+
+async function shareClip(c) {
+  const stamp = c.date.slice(0, 16).replace(/[-:]/g, "").replace("T", "-");
+  const file = new File([c.gif], `rapetitions-${stamp}-${c.reps}reps.gif`, { type: "image/gif" });
+  try {
+    if (navigator.canShare?.({ files: [file] })) return await navigator.share({ files: [file] });
+  } catch (err) {
+    if (err?.name === "AbortError") return; // the user closed the share sheet
+    console.info("Share failed, downloading instead", err);
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file);
+  a.download = file.name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+function openClips() {
+  els.clips.hidden = false;
+  renderClips();
+}
+els.clipsBtn.addEventListener("click", openClips);
+els.clipsIntro.addEventListener("click", openClips);
+els.clipsClose.addEventListener("click", () => { els.clips.hidden = true; });
+els.clipsOn.addEventListener("change", () => {
+  settings.clips = els.clipsOn.checked;
+  save();
+  if (!settings.clips) { app.clipBuf = []; app.clipKept = null; } // free the frames now
+  app.picker.reset();
+  renderButtons();
+});
 
 // ------------------------------------------------------------------ helpers
 
 function newCounter() {
   app.counter = new RepCounter(settings.mode === "body" ? POSE_OPTIONS : MOTION_OPTIONS);
+  app.picker.reset();
+  app.clipKept = null;
   app.pose.reset();
   renderCount(false);
   renderSets();
