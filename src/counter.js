@@ -62,7 +62,7 @@ export class RepCounter {
     const events = [];
     if (this.state === "counting") {
       if (this.current > 0) this.sets.push(this.current);
-      events.push({ type: "setEnd", reps: this.current, total: this.total });
+      events.push({ type: "setEnd", reps: this.current, total: this.total, lastRepT: this.lock.lastRepT });
       this.ignoreBefore = this.lock.lastRepT;
     }
     this.resetSet();
@@ -72,7 +72,7 @@ export class RepCounter {
   /**
    * Adds one frame. `t` in seconds (increasing); `features` an array of numbers, or null when
    * nothing was seen in this frame (no person). Returns the events it caused:
-   * {type: "lock", period, reps}, {type: "rep", reps, total}, {type: "setEnd", reps, total}.
+   * {type: "lock", period, reps, t}, {type: "rep", reps, total, t}, {type: "setEnd", reps, total, lastRepT}.
    */
   push(t, features) {
     const o = this.o;

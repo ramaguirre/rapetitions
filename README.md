@@ -3,7 +3,9 @@
 Counts exercise reps from the phone's camera, by itself. Prop the phone up, press **Start** and
 move: after about three reps the app recognises the loop, counts those first reps too, and keeps
 counting out loud. Stop moving for a few seconds and the set closes; start again and a new set
-begins. The screen stays on the whole time (no screensaver, no sleep).
+begins. Between sets a rest clock runs from your last rep, and the voice says each
+minute ("1 minute", "2 minutes"…); the sets line keeps the rests, e.g. `Sets: 12, rest 2:05, 10`.
+The screen stays on the whole time (no screensaver, no sleep).
 
 It does not need to see a body: any picture that repeats works. Put the phone at your feet,
 looking up, for deadlifts; under your head for push-ups; beside a rowing machine. Reps from
@@ -23,9 +25,9 @@ Buttons:
 |---|---|
 | Mode: Motion / Body | **Motion** (default) watches the whole picture as a coarse grey thumbnail: works for any repeated movement, full body in view or not. Each thumbnail is normalised by its own brightness and contrast, so the camera's automatic exposure and white balance do not look like movement. **Body** tracks your skeleton instead (MediaPipe Pose, on the CPU). |
 | Flip | Front / back camera |
-| Voice | Says each number aloud |
+| Voice | Says each rep number and each minute of rest aloud |
 | End set | Closes the set now, without waiting |
-| Reset | Clears all sets |
+| Reset | Clears all sets and rests |
 | Stop | Turns the camera off |
 
 The strip above the buttons shows the movement signal; while counting, the green band is the
@@ -49,7 +51,7 @@ threshold the signal must cross both ways for a rep.
 5. From then on each swing through the band (down past it, back up past it) is one rep. The band
    follows slow changes in depth or tempo; 2.5 periods without a rep (at least 3 s) end the set.
 
-All of this is in `src/counter.js`, with no browser code, so it is tested in Node.
+All of this is in `src/counter.js` (rest clock: `src/rest.js`), with no browser code, so it is tested in Node.
 
 ## Develop
 

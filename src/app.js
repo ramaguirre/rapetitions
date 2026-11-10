@@ -2,6 +2,7 @@
 import { RepCounter } from "./counter.js";
 import { PoseFeatures, motionFeatures, boxDownsample, SKELETON } from "./features.js";
 import { POSE_OPTIONS, MOTION_OPTIONS } from "./modes.js";
+import { RestTimer, clock } from "./rest.js";
 
 const TEXT = {
   en: {
@@ -16,8 +17,10 @@ const TEXT = {
     noPerson: "Step back until your body is in view",
     almost: (p) => `Rhythm found (${p} s per rep)…`,
     counting: (p) => `Counting · ${p} s per rep`,
-    setDone: (n) => `Set done: ${n} reps · resting`,
+    setDone: (n) => `Set done: ${n} reps`,
     sets: (list, total) => `Sets: ${list} · total ${total}`,
+    rest: (c) => `Rest ${c}`, restBetween: (c) => `rest ${c}`,
+    minutes: (m) => (m === 1 ? "1 minute" : `${m} minutes`),
     awake: "Screen stays on", asleep: "Screen may sleep",
   },
   es: {
@@ -32,8 +35,10 @@ const TEXT = {
     noPerson: "Aléjate hasta que se vea tu cuerpo",
     almost: (p) => `Ritmo encontrado (${p} s por repetición)…`,
     counting: (p) => `Contando · ${p} s por repetición`,
-    setDone: (n) => `Serie terminada: ${n} repeticiones · descanso`,
+    setDone: (n) => `Serie terminada: ${n} repeticiones`,
     sets: (list, total) => `Series: ${list} · total ${total}`,
+    rest: (c) => `Descanso ${c}`, restBetween: (c) => `descanso ${c}`,
+    minutes: (m) => (m === 1 ? "1 minuto" : `${m} minutos`),
     awake: "Pantalla siempre encendida", asleep: "La pantalla puede apagarse",
   },
 };
@@ -46,7 +51,7 @@ const els = {
   stage: $("stage"), video: $("video"), overlay: $("overlay"), trace: $("trace"), count: $("count"),
   status: $("status"), sets: $("sets"), intro: $("intro"), start: $("start"), loadmsg: $("loadmsg"),
   controls: $("controls"), mode: $("mode"), flip: $("flip"), voice: $("voice"), endset: $("endset"),
-  reset: $("reset"), stop: $("stop"), awake: $("awake"), perf: $("perf"),
+  reset: $("reset"), stop: $("stop"), awake: $("awake"), perf: $("perf"), rest: $("rest"),
 };
 for (const el of document.querySelectorAll("[data-i18n]")) {
   const v = T[el.dataset.i18n];
@@ -60,7 +65,7 @@ const settings = load(SETTINGS_KEY, { mode: "motion", voice: true, facing: "user
 const app = {
   running: false, stream: null, landmarker: null, trackerFailed: false,
   counter: null, pose: new PoseFeatures(), lastPose: null, lastVideoTime: -1, frames: 0,
-  wakeLock: null, seenPerson: false, t0: performance.now(), nextAt: 0, busyMs: 0,
+  wakeLock: null, seenPerson: false, t0: performance.now(), nextAt: 0, busyMs: 0, rest: new RestTimer(),
 };
 window.__rap = app; // for the browser tests
 
@@ -96,6 +101,8 @@ els.voice.addEventListener("click", () => {
 els.endset.addEventListener("click", () => handle(app.counter.endSet()));
 els.reset.addEventListener("click", () => {
   app.counter.resetAll();
+  app.rest.reset();
+  renderRest();
   renderCount(false);
   renderSets();
 });
@@ -265,9 +272,20 @@ function processFrame(t) {
 
 function handle(events) {
   for (const e of events) {
-    if (e.type === "lock") { renderCount(true); say(String(e.reps)); }
+    if (e.type === "lock") {
+      app.rest.stop(e.t, e.reps, e.period);
+      renderRest();
+      renderCount(true);
+      renderSets();
+      say(String(e.reps));
+    }
     if (e.type === "rep") { renderCount(true); say(String(e.reps)); }
-    if (e.type === "setEnd") { renderCount(false); renderSets(); }
+    if (e.type === "setEnd") {
+      if (e.reps > 0) app.rest.start(e.lastRepT ?? now());
+      renderRest();
+      renderCount(false);
+      renderSets();
+    }
   }
 }
 
@@ -284,8 +302,31 @@ function renderCount(bump) {
 }
 
 function renderSets() {
-  const s = app.counter.sets;
-  els.sets.textContent = s.length ? T.sets(s.join(" + "), app.counter.total) : "";
+  // "12, rest 2:05, 10": each finished rest sits between the sets it separates.
+  const s = app.counter.sets, rests = app.rest.rests;
+  const parts = [];
+  s.forEach((n, i) => {
+    if (i > 0 && rests[i - 1] !== undefined) parts.push(T.restBetween(clock(rests[i - 1])));
+    parts.push(String(n));
+  });
+  els.sets.textContent = s.length ? T.sets(parts.join(", "), app.counter.total) : "";
+}
+
+function renderRest() {
+  els.rest.hidden = !app.rest.resting;
+  if (app.rest.resting) els.rest.textContent = T.rest(clock(app.rest.elapsed(now())));
+}
+
+// The rest clock runs on its own timer: frames may be skipped, minutes must not be.
+setInterval(() => {
+  if (!app.rest.resting) return;
+  renderRest();
+  const m = app.rest.tick(now());
+  if (m && app.running) say(T.minutes(m));
+}, 250);
+
+function now() {
+  return (performance.now() - app.t0) / 1000; // the counter's clock
 }
 
 let lastStatus = "";

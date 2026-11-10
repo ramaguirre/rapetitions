@@ -39,7 +39,15 @@ try {
     // MediaPipe prints its own "INFO: ..." lines through console.error; those are not failures.
     page.on("console", (m) => { if (m.type() === "error" && !m.text().startsWith("INFO:")) errors.push(m.text()); });
     page.on("pageerror", (e) => errors.push(String(e)));
-    await page.addInitScript((m) => localStorage.setItem("rapetitions.settings.v2", JSON.stringify({ mode: m, voice: false })), mode);
+    await page.addInitScript((m) => {
+      localStorage.setItem("rapetitions.settings.v2", JSON.stringify({ mode: m, voice: true }));
+      // Record what the voice says instead of speaking.
+      window.__said = [];
+      if (window.speechSynthesis) {
+        speechSynthesis.speak = (u) => window.__said.push(u.text);
+        speechSynthesis.cancel = () => {};
+      }
+    }, mode);
     await page.goto(url);
     await page.click("#start");
     const t0 = Date.now();
@@ -62,6 +70,28 @@ try {
       await new Promise((r) => setTimeout(r, 250));
     }
     if (mode === "motion") {
+      // Rest clock: visible after the set, and the voice says the minutes (jump the rest forward).
+      const rest1 = await page.evaluate(() => ({ hidden: document.getElementById("rest").hidden, text: document.getElementById("rest").textContent }));
+      check(!rest1.hidden && /^Rest 0:\d\d$/.test(rest1.text), `rest clock shown after the set (${rest1.text})`);
+      await page.evaluate(() => { window.__rap.rest.since -= 59; });
+      await new Promise((r) => setTimeout(r, 1500));
+      const said = await page.evaluate(() => window.__said.filter((x) => x.trim()));
+      const rest2 = await page.textContent("#rest");
+      check(said.includes("1 minute"), `voice says "1 minute" (said: ${said.join(", ")})`);
+      check(/^Rest 1:0\d$/.test(rest2), `rest clock passes one minute (${rest2})`);
+      const nums = said.filter((x) => /^\d+$/.test(x)).map(Number);
+      check(nums.at(-1) === 10 && nums.every((n, i) => i === 0 || n === nums[i - 1] + 1), `voice counts the reps up to 10 (${nums.join(" ")})`);
+      if (shots) await page.screenshot({ path: path.join(shots, "resting.png") });
+      // The clip loops: the second set stops the clock; once it ends, the rest shows between sets.
+      let s2;
+      for (const t1 = Date.now(); Date.now() - t1 < 60000;) {
+        s2 = await page.evaluate(() => ({ sets: window.__rap.counter.sets, resting: window.__rap.rest.resting,
+          rests: window.__rap.rest.rests, line: document.getElementById("sets").textContent }));
+        if (s2.sets.length >= 2) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      check(s2.rests.length === 1 && s2.rests[0] > 60 && s2.rests[0] < 90, `second set ends the rest (${s2.rests.map((x) => x.toFixed(0))} s)`);
+      check(/^Sets: 10, rest 1:\d\d, 10 · total 20$/.test(s2.line), `rest shown between sets ("${s2.line}")`);
       check(JSON.stringify(s.sets) === "[10]", `motion mode counts 10 reps in one set (got sets ${JSON.stringify(s.sets)}, total ${s.total})`);
     } else {
       check(s.tracker, "body tracker loaded");

@@ -1,9 +1,9 @@
 // Offline cache. The app shell is cached at install; the tracker files (about 15 MB) are cached the
 // first time they are used. Bump VERSION when any file changes so phones pick up the new copy.
-const VERSION = "rapetitions-v5";
+const VERSION = "rapetitions-v6";
 const SHELL = [
   "./", "index.html", "manifest.webmanifest", "src/style.css", "src/app.js", "src/counter.js",
-  "src/features.js", "src/modes.js", "icons/icon-192.png", "icons/icon-512.png",
+  "src/features.js", "src/modes.js", "src/rest.js", "icons/icon-192.png", "icons/icon-512.png",
 ];
 
 self.addEventListener("install", (e) => {
