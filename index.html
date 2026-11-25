@@ -17,7 +17,9 @@
     <canvas id="overlay"></canvas>
 
     <header id="hud">
+      <div id="plan" hidden></div>
       <div id="count" aria-live="polite">0</div>
+      <div id="timer" hidden></div>
       <div id="status" data-i18n="ready">Ready</div>
       <div id="rest" hidden></div>
       <div id="sets"></div>
@@ -27,11 +29,28 @@
 
     <section id="intro">
       <h1>RApetitions</h1>
-      <p data-i18n="intro1">Prop the phone up so your body is in view, then start your set.</p>
-      <p data-i18n="intro2">After a few reps it finds the rhythm and counts by itself. The first reps are included.</p>
+      <div id="today" hidden>
+        <div id="todayprog" class="kicker"></div>
+        <div id="todaywhat" class="big"></div>
+        <div id="weekline" class="small"></div>
+        <div id="suggest" hidden>
+          <p id="suggesttext"></p>
+          <div class="row"><button id="sugyes"></button><button id="sugno"></button></div>
+        </div>
+        <ul id="todaysteps"></ul>
+        <button id="startplan" class="primary"></button>
+      </div>
+      <div id="freeintro">
+        <p data-i18n="intro1">Prop the phone up so your body is in view, then start your set.</p>
+        <p data-i18n="intro2">After a few reps it finds the rhythm and counts by itself. The first reps are included.</p>
+      </div>
       <button id="start" class="primary" data-i18n="start">Start</button>
       <p id="loadmsg" class="small"></p>
-      <button id="clipsintro" class="secondary" data-i18n="clips">Clips</button>
+      <div class="row">
+        <button id="programbtn" class="secondary" data-i18n="program">Program</button>
+        <button id="historybtn" class="secondary" data-i18n="history">History</button>
+        <button id="clipsintro" class="secondary" data-i18n="clips">Clips</button>
+      </div>
     </section>
 
     <nav id="controls" hidden>
@@ -40,10 +59,11 @@
       <button id="voice"></button>
       <button id="clipsbtn"></button>
       <button id="endset" data-i18n="endset">End set</button>
+      <button id="next" data-i18n="next" hidden>Skip set</button>
       <button id="reset" data-i18n="reset">Reset</button>
       <button id="stop" data-i18n="stop">Stop</button>
     </nav>
-    <section id="clips" hidden>
+    <section id="clips" class="panel" hidden>
       <header>
         <h2 data-i18n="clips">Clips</h2>
         <button id="clipsclose" data-i18n="close">Close</button>
@@ -53,6 +73,34 @@
       <p id="clipsinfo" class="small"></p>
       <ul id="cliplist"></ul>
     </section>
+    <section id="program" class="panel" hidden>
+      <header>
+        <h2 data-i18n="program">Program</h2>
+        <button class="close" data-i18n="close">Close</button>
+      </header>
+      <div id="programbody"></div>
+    </section>
+    <section id="history" class="panel" hidden>
+      <header>
+        <h2 data-i18n="history">History</h2>
+        <button class="close" data-i18n="close">Close</button>
+      </header>
+      <div id="historybody"></div>
+    </section>
+    <section id="summary" class="panel" hidden>
+      <header>
+        <h2 data-i18n="done">Session done</h2>
+        <button class="close" data-i18n="close">Close</button>
+      </header>
+      <div id="summarybody"></div>
+    </section>
+    <section id="ask" hidden>
+      <div class="card">
+        <p id="askq"></p>
+        <div id="askopts"></div>
+      </div>
+    </section>
+    <input type="file" id="filein" accept=".json,application/json" hidden>
     <div id="awake" hidden></div>
     <div id="perf"></div>
   </main>

@@ -17,6 +17,12 @@ on. Same pattern as take_recorder: plain HTML/JS, no build, GitHub Pages, works 
   user deletes it, and sent elsewhere only when the user presses Share.
 - Clip choice and frames are in `src/clip.js`, the GIF encoder in `src/gif.js` (no browser APIs,
   tested in Node); the encoder runs in a worker so counting never stalls.
+- Programs and adherence (director, 2026-11-25): every session is logged on the phone; a program is
+  data, not code, so anyone's program works (the Achilles plan is only the first template). One
+  program at a time. Volume, frequency and consistency (clean weeks) are measured; what counts as
+  clean is editable per program; the next stage is only suggested, after 2 clean weeks by default,
+  and the user confirms. Logic in `src/program.js`, `src/session.js`, `src/progress.js` (no
+  browser APIs, tested in Node). The log leaves the phone only through Export.
 
 ## Tracking (RAMonitor)
 

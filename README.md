@@ -30,11 +30,49 @@ Buttons:
 | Voice | Says each rep number and each minute of rest aloud |
 | End set | Closes the set now, without waiting |
 | Clips: on / off | Opens the clips: the switch to save one rep per set, and the saved clips (newest first) with **Share** and **Delete**. Also on the start screen. |
-| Reset | Clears all sets and rests |
-| Stop | Turns the camera off |
+| Reset | Clears all sets and rests (free count) |
+| Skip set | In a program session: moves past a set not done (or ends the warm-up timer) |
+| Stop / Finish | Turns the camera off and logs the session; in a program session, asks the pain question first |
 
 The strip above the buttons shows the movement signal; while counting, the green band is the
 threshold the signal must cross both ways for a rep.
+
+## Programs and the log
+
+Every session is logged **on the phone** (history, with delete). **Export** in History saves the
+log as a file to keep or to move to another phone; **Import** reads it back (clips are not in it).
+
+**Program** lets you follow a training program. The app is not built around any one program:
+a program is a small file (days, steps, sets × reps, optional tempo, weight, one side at a time,
+stages, rules), and it comes from the built-in list or from a file someone shares with you.
+The first built-in program is a 12-week Achilles rehabilitation plan. One program at a time.
+
+With a program, the start screen shows today: planned or rest day, this week's sessions and
+reps so far, and today's steps with the weight for each exercise (carried forward until you change
+it). **Start today's session** walks the steps: a warm-up timer, then each exercise set by set
+("Standing calf raises · set 2 of 3 · 12 reps"), alternating left and right for one-side work.
+If the program sets a tempo, reps clearly faster than it get a "slower" (once per set). At the end
+it asks for pain (0-10) if the program wants it, and the next time the app is opened, the morning
+after, whether symptoms are worse.
+
+What it measures:
+
+- **Volume**: reps done against reps planned (extra reps in one set do not make up for a missed one).
+- **Frequency**: sessions done against sessions planned each week.
+- **Consistency**: a week is **clean** when its sessions and reps are done, pain stayed within the
+  limit and no morning was worse, with no extra sessions. History shows clean weeks in a row, the
+  last four weeks, and each week with what kept it from being clean.
+
+What counts as clean is editable for each program (Program → *What counts as a clean week*).
+After the set number of clean weeks in a row (2 by default), and not before the week the program
+allows, the app **suggests** the next stage (or adding weight, in stages that progress by weight);
+pain above the limit or a worse morning suggests easing off. It only suggests: you confirm, and
+you can move to any stage yourself.
+
+Code: `src/program.js` (format, templates, calendar), `src/session.js` (a session step by step,
+the logged record), `src/progress.js` (weeks, clean weeks, suggestions), `src/backup.js`, all
+without browser code and tested in Node; `src/logstore.js` (the log on the phone), `src/text.js`
+(English and Spanish).
 
 ## How it counts
 
@@ -74,7 +112,8 @@ node --test tests/*.test.mjs    # the method on synthetic data: squats, curls, f
                                 # and camera views of push-ups (phone under the head) and
                                 # deadlifts (phone at the feet), 1.2 to 7.5 s per rep
 node tests/e2e.mjs shots/       # headless Chrome with a fake camera clip: counts 10 of 10,
-                                # rest clock, and one looping clip saved per set
+                                # rest clock, one looping clip saved per set, and a program
+                                # session from start to log, history and morning question
 ```
 
 `tests/e2e.mjs` needs Playwright and Python 3. To try it on the phone from a PC on the same Wi-Fi

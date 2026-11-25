@@ -1,6 +1,8 @@
 // Browser check with Chrome's fake camera: node tests/e2e.mjs [screenshot-folder]
 // 1. Motion mode on a synthetic clip with 10 reps must count exactly 10, in one set.
 // 2. Body mode must load the tracker (no person in the clip) and run without console errors.
+// 3. A program: today's session walked step by step (timer, then two counted sets), the pain
+//    question, the log, the history, the morning question, a suggestion and an unfinished session.
 import { createRequire } from "node:module";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
@@ -136,6 +138,133 @@ print(json.dumps({"n": im.n_frames, "ms": d, "size": im.size, "loop": im.info.ge
     check(s.awake.includes("stays on"), `screen kept on (${s.awake})`);
     check(errors.length === 0, `no console errors in ${mode} mode${errors.length ? ": " + errors.join(" | ") : ""}`);
     console.log(`     ${mode}: status "${s.status}", count ${s.count}, "${s.awake}", ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+    await ctx.close();
+  }
+  // ---------------------------------------------------------------- 3. following a program
+  {
+    const ctx = await browser.newContext({ viewport: { width: 412, height: 860 }, deviceScaleFactor: 1, locale: "en-US" });
+    await ctx.grantPermissions(["camera", "screen-wake-lock"]);
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+    page.on("pageerror", (e) => errors.push(String(e)));
+    page.on("dialog", (d) => d.accept());
+    await page.addInitScript(() => {
+      localStorage.setItem("rapetitions.settings.v2", JSON.stringify({ mode: "motion", voice: true, clips: false }));
+      if (!localStorage.getItem("rapetitions.program.v1")) {
+        const p = new Date(), day = `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, "0")}-${String(p.getDate()).padStart(2, "0")}`;
+        localStorage.setItem("rapetitions.program.v1", JSON.stringify({
+          program: { name: "Test squats", days: [1, 2, 3, 4, 5, 6, 7], unit: "kg",
+            checkins: { pain: true, morning: true }, clean: { maxPain: 3 },
+            stages: [{ name: "Base", steps: [{ type: "timer", name: "Warm-up", minutes: 0.05 },
+              { type: "exercise", name: "Squats", sets: 2, reps: 10, tempo: 4, weight: true }] }] },
+          progress: { programId: "test-squats", startDay: day, stage: 0, since: day, weights: { Squats: 5 }, snoozed: null },
+        }));
+      }
+      window.__said = [];
+      if (window.speechSynthesis) {
+        speechSynthesis.speak = (u) => window.__said.push(u.text);
+        speechSynthesis.cancel = () => {};
+      }
+    });
+    await page.goto(url);
+    await page.evaluate(() => window.__rap.ready);
+    const today = await page.evaluate(() => ({ hidden: document.getElementById("today").hidden,
+      btn: document.getElementById("startplan").textContent, what: document.getElementById("todaywhat").textContent,
+      weight: document.querySelector("#todaysteps input")?.value, free: document.getElementById("start").textContent }));
+    check(!today.hidden && today.btn === "Start today's session" && today.what === "Today: session planned",
+      `today's plan on the start screen ("${today.what}", "${today.btn}")`);
+    check(today.weight === "5" && today.free === "Count freely", `weight carried forward (${today.weight}), free count still offered`);
+    if (shots) await page.screenshot({ path: path.join(shots, "today.png") });
+    await page.click("#startplan");
+    let g;
+    for (const t1 = Date.now(); Date.now() - t1 < 15000;) {
+      g = await page.evaluate(() => ({ i: window.__rap.guided?.i, timer: !document.getElementById("timer").hidden,
+        plan: document.getElementById("plan").textContent, status: document.getElementById("status").textContent }));
+      if (g.timer && !page._t && shots) { page._t = true; await page.screenshot({ path: path.join(shots, "warmup.png") }); }
+      if (g.i === 1) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    check(g.i === 1 && !g.timer, `warm-up timer runs out, then the first exercise (${g.plan})`);
+    let ask = false;
+    for (const t1 = Date.now(); Date.now() - t1 < 90000;) {
+      const a = await page.evaluate(() => ({ ask: !document.getElementById("ask").hidden, state: window.__rap.counter.state,
+        set: window.__rap.guided?.slot()?.set }));
+      if (a.state === "counting" && a.set === 2 && shots && !page._c) { page._c = true; await page.screenshot({ path: path.join(shots, "guided.png") }); }
+      if (a.ask) { ask = true; break; }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    check(ask, "both sets counted, then the pain question");
+    if (shots) await page.screenshot({ path: path.join(shots, "pain.png") });
+    await page.click("#askopts button:text-is('2')");
+    await page.waitForSelector("#summary:not([hidden])");
+    if (shots) await page.screenshot({ path: path.join(shots, "summary.png") });
+    const rec = await page.evaluate(async () => {
+      const { listSessions } = await import("./src/logstore.js");
+      return (await listSessions())[0];
+    });
+    const sq = rec.steps[1];
+    check(JSON.stringify(sq.done.map((d) => d.reps)) === "[10,10]" && rec.pain === 2 && sq.weight === 5 && rec.steps[0].doneTimer,
+      `session logged: ${sq.done.map((d) => d.reps)} reps at ${sq.weight} kg, pain ${rec.pain}`);
+    check(sq.done.every((d) => Math.abs(d.sec - 2) < 0.3), `seconds per rep logged (${sq.done.map((d) => d.sec)})`);
+    const said = await page.evaluate(() => window.__said);
+    check(said.includes("Next: Squats") && said.some((x) => x.endsWith(", slower")) && said.includes("Session complete"),
+      `voice: next exercise, tempo, end (${said.filter((x) => !/^\d+$/.test(x) && x.trim()).join(" | ")})`);
+    await page.click("#summary .close");
+    const after = await page.textContent("#todaywhat");
+    check(after === "Today's session is done", `start screen knows today is done ("${after}")`);
+    await page.click("#historybtn");
+    const hist = await page.evaluate(() => ({ cards: document.querySelectorAll("#historybody .card").length,
+      stats: [...document.querySelectorAll("#historybody .stats b")].map((b) => b.textContent) }));
+    // One session of the week's planned ones (every day from today to Sunday): that share of the reps.
+    const [d1, pl] = hist.stats[0].split("/").map(Number);
+    check(hist.cards === 1 && d1 === 1 && hist.stats[1] === `${Math.round(100 / pl)}%`, `history: one session, stats ${hist.stats.join(" / ")}`);
+    if (shots) await page.screenshot({ path: path.join(shots, "history.png"), fullPage: true });
+    await page.click("#history .close");
+    // Next day: the session moves to yesterday; the morning question comes up on opening.
+    await page.evaluate(async (r) => {
+      const { putSession } = await import("./src/logstore.js");
+      const { addDays } = await import("./src/program.js");
+      const p = JSON.parse(localStorage.getItem("rapetitions.program.v1"));
+      p.progress.startDay = p.progress.since = addDays(r.day, -1);
+      localStorage.setItem("rapetitions.program.v1", JSON.stringify(p));
+      await putSession({ ...r, day: addDays(r.day, -1), start: new Date(Date.now() - 86400000).toISOString() });
+    }, rec);
+    await page.reload();
+    await page.waitForSelector("#ask:not([hidden])");
+    const q = await page.textContent("#askq");
+    check(/worse this morning/.test(q), `morning question on opening ("${q}")`);
+    if (shots) await page.screenshot({ path: path.join(shots, "morning.png") });
+    await page.click("#askopts button:text-is('A bit')");
+    await page.waitForSelector("#suggest:not([hidden])");
+    const sug = await page.textContent("#suggesttext");
+    check(/worse the morning after/.test(sug), `worse morning: suggests easing off ("${sug}")`);
+    if (shots) await page.screenshot({ path: path.join(shots, "suggest.png") });
+    // A session cut short (app closed mid-session) is logged as unfinished on the next opening.
+    await page.evaluate(async () => {
+      const { GuidedSession } = await import("./src/session.js");
+      const g = new GuidedSession({ programId: "test-squats", programName: "Test squats", stage: 0, stageName: "Base", planned: true,
+        unit: "kg", steps: [{ type: "exercise", name: "Squats", sets: 2, reps: 10 }] }, new Date().toISOString());
+      g.recordSet(7, 2);
+      localStorage.setItem("rapetitions.draft.v1", JSON.stringify({ ...g.draft(), saved: new Date().toISOString() }));
+    });
+    await page.reload();
+    await page.evaluate(() => window.__rap.ready);
+    await page.click("#historybtn");
+    const unf = await page.evaluate(() => [...document.querySelectorAll("#historybody .card .muted")].map((e) => e.textContent).join(" | "));
+    check(/not finished/.test(unf) && /7 of 20 planned reps/.test(unf), `unfinished session recovered (${unf})`);
+    await page.click("#history .close");
+    // Any program: switch to the built-in Achilles template.
+    await page.click("#programbtn");
+    await page.click("#programbody button:text-is('Follow this program')");
+    const prog = await page.evaluate(() => document.querySelector("#programbody h3").textContent);
+    check(prog === "Achilles rehabilitation", `template followed (${prog})`);
+    if (shots) await page.screenshot({ path: path.join(shots, "program.png"), fullPage: true });
+    await page.click("#program .close");
+    const steps = await page.evaluate(() => [...document.querySelectorAll("#todaysteps .what")].map((e) => e.firstChild.textContent));
+    check(steps.length === 3 && steps[1] === "Standing calf raises", `Achilles session on the start screen (${steps.join(", ")})`);
+    if (shots) await page.screenshot({ path: path.join(shots, "achilles.png") });
+    check(errors.length === 0, `no console errors with a program${errors.length ? ": " + errors.join(" | ") : ""}`);
     await ctx.close();
   }
   // A phone with nothing saved, or with the old settings key, starts in Motion mode.
